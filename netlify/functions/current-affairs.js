@@ -76,7 +76,7 @@ function parseFeed(xml, feed) {
   );
 }
 
-async function handler() {
+ export async function handler() {
   const results = await Promise.all(
     FEEDS.map(async feed => {
       try {
@@ -134,4 +134,3 @@ async function handler() {
   };
 }
 
-exports.handler = handler;
