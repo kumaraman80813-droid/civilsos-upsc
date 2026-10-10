@@ -1,0 +1,131 @@
+
+const FEEDS = [
+  {
+    name: "Insights IAS",
+    url: "https://www.insightsonindia.com/feed",
+    priority: "primary"
+  },
+  {
+    name: "Down To Earth",
+    url: "https://www.downtoearth.org.in/environment/down-to-earth-rss-feeds-33375",
+    priority: "supplement"
+  },
+  {
+    name: "World Economic Forum",
+    url: "https://www.weforum.org/feed/",
+    priority: "supplement"
+  }
+];
+
+function clean(text = "") {
+  return text
+    .replace(/<!\[CDATA\[|\]\]>/g, "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTag(xml, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = xml.match(
+    new RegExp(
+      `<${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escaped}>`,
+      "i"
+    )
+  );
+  return match ? clean(match[1]) : "";
+}
+
+function parseFeed(xml, source) {
+  const blocks = [
+    ...xml.matchAll(/<(item|entry)\b[^>]*>([\s\S]*?)<\/\1>/gi)
+  ];
+
+  return blocks.slice(0, 15).map((match) => {
+    const item = match[2];
+    const linkTag = item.match(
+      /<link[^>]*href=["']([^"']+)["'][^>]*\/?>/i
+    );
+
+    const link = getTag(item, "link") || (linkTag ? linkTag[1] : "");
+
+    return {
+      title: getTag(item, "title") || "Untitled article",
+      link: link.trim(),
+      published:
+        getTag(item, "pubDate") ||
+        getTag(item, "published") ||
+        getTag(item, "updated"),
+      summary:
+        getTag(item, "description") ||
+        getTag(item, "summary") ||
+        getTag(item, "content"),
+      source: source.name,
+      priority: source.priority
+    };
+  }).filter((article) =>
+    article.title && article.link.startsWith("http")
+  );
+}
+
+export default async function handler() {
+  const results = await Promise.all(
+    FEEDS.map(async (feed) => {
+      try {
+        const response = await fetch(feed.url, {
+          headers: {
+            "User-Agent": "CivilsOS/1.0 RSS reader"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const xml = await response.text();
+
+        return {
+          source: feed.name,
+          articles: parseFeed(xml, feed),
+          error: null
+        };
+      } catch {
+        return {
+          source: feed.name,
+          articles: [],
+          error: "Feed unavailable; try again later."
+        };
+      }
+    })
+  );
+
+  const articles = results
+    .flatMap((result) => result.articles)
+    .sort((a, b) =>
+      Date.parse(b.published || 0) -
+      Date.parse(a.published || 0)
+    );
+
+  return new Response(
+    JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      articles,
+      sources: results.map((result) => ({
+        source: result.source,
+        count: result.articles.length,
+        error: result.error
+      }))
+    }),
+    {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "public, max-age=900"
+      }
+    }
+  );
+}
