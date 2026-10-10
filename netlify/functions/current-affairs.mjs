@@ -64,7 +64,7 @@ function parseFeed(xml, feed) {
   }).filter(article => article.title && /^https?:\/\//i.test(article.link));
 }
 
-export async function handler(event, context) {
+export default async function handler(request) {
   const results = await Promise.all(
     FEEDS.map(async feed => {
       try {
